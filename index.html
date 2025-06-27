@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>クイズ大会 得点計算アプリ</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .lucide {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            stroke-width: 2;
+            fill: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        // Lucide Icons as SVG components
+        const RotateCcw = () => (
+            <svg className="lucide" viewBox="0 0 24 24">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                <path d="M3 3v5h5"/>
+            </svg>
+        );
+
+        const Undo2 = () => (
+            <svg className="lucide" viewBox="0 0 24 24">
+                <path d="M9 14 4 9l5-5"/>
+                <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/>
+            </svg>
+        );
+
+        const QuizScoreApp = () => {
+            const initialState = {
+                teamA: Array(5).fill(null).map((_, i) => ({
+                    id: i + 1,
+                    score: 1,
+                    hasAnswerRight: true,
+                    missedOnce: false
+                })),
+                teamB: Array(5).fill(null).map((_, i) => ({
+                    id: i + 1,
+                    score: 1,
+                    hasAnswerRight: true,
+                    missedOnce: false
+                }))
+            };
+
+            const [gameState, setGameState] = useState(initialState);
+            const [history, setHistory] = useState([]);
+            const [editMode, setEditMode] = useState({ active: false, team: '', position: -1, type: 'score' });
+            const [editValue, setEditValue] = useState('');
+
+            // 合計得点計算
+            const calculateTotalScore = (team) => {
+                return team.reduce((total, player) => total * player.score, 1);
+            };
+
+            // リーチ判定（次の正解で200点に到達する番号）
+            const getReachPositions = (team) => {
+                const reachPositions = [];
+                team.forEach((player, index) => {
+                    if (player.hasAnswerRight) {
+                        const tempTeam = [...team];
+                        tempTeam[index] = { ...player, score: player.score + 1 };
+                        if (calculateTotalScore(tempTeam) >= 200) {
+                            reachPositions.push(index);
+                        }
+                    }
+                });
+                return reachPositions;
+            };
+
+            // 履歴保存
+            const saveToHistory = () => {
+                setHistory(prev => [JSON.parse(JSON.stringify(gameState)), ...prev.slice(0, 4)]);
+            };
+
+            // 正解処理
+            const handleCorrect = (team, position) => {
+                saveToHistory();
+                setGameState(prev => ({
+                    ...prev,
+                    [team]: prev[team].map((player, index) => 
+                        index === position 
+                            ? { ...player, score: player.score + 1 }
+                            : player
+                    )
+                }));
+            };
+
+            // 誤答処理
+            const handleIncorrect = (team, position) => {
+                saveToHistory();
+                setGameState(prev => {
+                    const newState = JSON.parse(JSON.stringify(prev)); // 深いコピーを作成
+                    const targetTeam = newState[team];
+                    const opponentTeam = newState[team === 'teamA' ? 'teamB' : 'teamA'];
+                    
+                    // 誤答した番号の処理
+                    if (!targetTeam[position].missedOnce) {
+                        // 1回目の誤答：ポイント1にリセット、誤答フラグを立てる
+                        targetTeam[position] = {
+                            ...targetTeam[position],
+                            score: 1,
+                            missedOnce: true
+                        };
+                    } else {
+                        // 2回目以降の誤答：ポイント1にリセット、解答権喪失
+                        targetTeam[position] = {
+                            ...targetTeam[position],
+                            score: 1,
+                            hasAnswerRight: false
+                        };
+                    }
+                    
+                    // 相手チームの失権者を復活させる
+                    opponentTeam.forEach((player, index) => {
+                        if (!player.hasAnswerRight) {
+                            opponentTeam[index] = {
+                                ...player,
+                                hasAnswerRight: true,
+                                missedOnce: true,
+                                score: 1
+                            };
+                        }
+                    });
+                    
+                    return newState;
+                });
+            };
+
+            // リセット
+            const handleReset = () => {
+                setGameState(initialState);
+                setHistory([]);
+            };
+
+            // UNDO
+            const handleUndo = () => {
+                if (history.length > 0) {
+                    setGameState(history[0]);
+                    setHistory(prev => prev.slice(1));
+                }
+            };
+
+            // 手動編集
+            const startEdit = (team, position, type = 'score') => {
+                if (type === 'score') {
+                    setEditMode({ active: true, team, position, type });
+                    setEditValue(gameState[team][position].score.toString());
+                } else if (type === 'status') {
+                    setEditMode({ active: true, team, position, type });
+                }
+            };
+
+            const saveEdit = () => {
+                if (editMode.type === 'score') {
+                    const newScore = parseInt(editValue);
+                    if (newScore > 0) {
+                        setGameState(prev => ({
+                            ...prev,
+                            [editMode.team]: prev[editMode.team].map((player, index) => 
+                                index === editMode.position 
+                                    ? { ...player, score: newScore }
+                                    : player
+                            )
+                        }));
+                    }
+                }
+                setEditMode({ active: false, team: '', position: -1, type: 'score' });
+                setEditValue('');
+            };
+
+            const saveStatusEdit = (newStatus) => {
+                setGameState(prev => ({
+                    ...prev,
+                    [editMode.team]: prev[editMode.team].map((player, index) => 
+                        index === editMode.position 
+                            ? { 
+                                ...player, 
+                                hasAnswerRight: newStatus.hasAnswerRight,
+                                missedOnce: newStatus.missedOnce
+                            }
+                            : player
+                    )
+                }));
+                setEditMode({ active: false, team: '', position: -1, type: 'score' });
+            };
+
+            const cancelEdit = () => {
+                setEditMode({ active: false, team: '', position: -1, type: 'score' });
+                setEditValue('');
+            };
+
+            // プレイヤーの状態に基づくクラス名取得
+            const getPlayerClasses = (player, isReach) => {
+                let classes = 'p-2 rounded-lg border-2 transition-all duration-200 ';
+                
+                if (!player.hasAnswerRight) {
+                    // 失権状態
+                    classes += 'bg-red-100 border-red-400 text-red-800 ';
+                    if (isReach) {
+                        classes += 'ring-4 ring-yellow-300 ';
+                    }
+                } else if (isReach) {
+                    // リーチ状態
+                    classes += 'bg-yellow-100 border-yellow-400 text-yellow-800 ring-4 ring-yellow-300 ';
+                    if (player.missedOnce) {
+                        classes += 'bg-gradient-to-r from-yellow-100 to-orange-100 ';
+                    }
+                } else if (player.missedOnce) {
+                    // 1回誤答状態
+                    classes += 'bg-orange-100 border-orange-400 text-orange-800 ';
+                } else {
+                    // 通常状態
+                    classes += 'bg-blue-50 border-blue-200 text-blue-800 ';
+                }
+                
+                return classes;
+            };
+
+            const TeamSection = ({ teamName, teamData, teamKey }) => {
+                const totalScore = calculateTotalScore(teamData);
+                const reachPositions = getReachPositions(teamData);
+                const isWinner = totalScore >= 200;
+
+                return (
+                    <div className="mb-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-2xl font-bold text-gray-800">{teamName}</h2>
+                            <div className={`text-4xl font-bold px-4 py-2 rounded-lg ${
+                                isWinner ? 'bg-green-100 text-green-800 border-2 border-green-400' :
+                                totalScore >= 100 ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
+                            }`}>
+                                {totalScore}点
+                            </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-5 gap-2 mb-4">
+                            {teamData.map((player, index) => {
+                                const isReach = reachPositions.includes(index);
+                                return (
+                                    <div key={index} className={getPlayerClasses(player, isReach)}>
+                                        <div className="text-center">
+                                            <div className="text-sm font-medium">{index + 1}番</div>
+                                            <div className="text-2xl font-bold my-1">
+                                                {editMode.active && editMode.team === teamKey && editMode.position === index && editMode.type === 'score' ? (
+                                                    <input
+                                                        type="number"
+                                                        value={editValue}
+                                                        onChange={(e) => setEditValue(e.target.value)}
+                                                        className="w-12 text-center border rounded"
+                                                        min="1"
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') saveEdit();
+                                                            if (e.key === 'Escape') cancelEdit();
+                                                        }}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    <span onClick={() => startEdit(teamKey, index, 'score')} className="cursor-pointer">
+                                                        {player.score}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="flex gap-1 mt-1">
+                                                <button
+                                                    onClick={() => handleCorrect(teamKey, index)}
+                                                    disabled={!player.hasAnswerRight}
+                                                    className="flex-1 bg-green-500 text-white text-xs py-1.5 px-1 rounded disabled:bg-gray-300 disabled:cursor-not-allowed min-h-[28px] flex items-center justify-center"
+                                                >
+                                                    ◯
+                                                </button>
+                                                <button
+                                                    onClick={() => handleIncorrect(teamKey, index)}
+                                                    disabled={!player.hasAnswerRight}
+                                                    className="flex-1 bg-red-500 text-white text-xs py-1.5 px-1 rounded disabled:bg-gray-300 disabled:cursor-not-allowed min-h-[28px] flex items-center justify-center"
+                                                >
+                                                    ×
+                                                </button>
+                                            </div>
+                                            {!player.hasAnswerRight && (
+                                                <div 
+                                                    className="text-xs text-red-600 mt-1 cursor-pointer hover:underline"
+                                                    onClick={() => startEdit(teamKey, index, 'status')}
+                                                >
+                                                    封鎖
+                                                </div>
+                                            )}
+                                            {player.missedOnce && player.hasAnswerRight && (
+                                                <div 
+                                                    className="text-xs text-orange-600 mt-1 cursor-pointer hover:underline"
+                                                    onClick={() => startEdit(teamKey, index, 'status')}
+                                                >
+                                                    誤答済
+                                                </div>
+                                            )}
+                                            {isReach && (
+                                                <div className="text-xs text-yellow-700 mt-1 font-bold">リーチ!</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                );
+            };
+
+            const teamAScore = calculateTotalScore(gameState.teamA);
+            const teamBScore = calculateTotalScore(gameState.teamB);
+            const winner = teamAScore >= 200 ? 'Aチーム' : teamBScore >= 200 ? 'Bチーム' : null;
+
+            if (editMode.active && editMode.type === 'score') {
+                return (
+                    <div className="min-h-screen bg-gray-50 p-4">
+                        <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
+                            <h3 className="text-lg font-bold mb-4">得点を編集</h3>
+                            <p className="mb-4">
+                                {editMode.team === 'teamA' ? 'Aチーム' : 'Bチーム'} {editMode.position + 1}番の得点
+                            </p>
+                            <input
+                                type="number"
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                className="w-full p-2 border rounded mb-4"
+                                min="1"
+                                placeholder="得点を入力"
+                            />
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={saveEdit}
+                                    className="flex-1 bg-blue-500 text-white py-2 px-4 rounded"
+                                >
+                                    保存
+                                </button>
+                                <button
+                                    onClick={cancelEdit}
+                                    className="flex-1 bg-gray-500 text-white py-2 px-4 rounded"
+                                >
+                                    キャンセル
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (editMode.active && editMode.type === 'status') {
+                return (
+                    <div className="min-h-screen bg-gray-50 p-4">
+                        <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
+                            <h3 className="text-lg font-bold mb-4">状態を編集</h3>
+                            <p className="mb-4">
+                                {editMode.team === 'teamA' ? 'Aチーム' : 'Bチーム'} {editMode.position + 1}番の状態
+                            </p>
+                            <div className="space-y-3 mb-4">
+                                <button
+                                    onClick={() => saveStatusEdit({ hasAnswerRight: true, missedOnce: false })}
+                                    className="w-full p-3 text-left bg-blue-50 border-2 border-blue-200 rounded hover:bg-blue-100"
+                                >
+                                    <div className="font-medium">通常状態</div>
+                                    <div className="text-sm text-gray-600">解答権あり、誤答なし</div>
+                                </button>
+                                <button
+                                    onClick={() => saveStatusEdit({ hasAnswerRight: true, missedOnce: true })}
+                                    className="w-full p-3 text-left bg-orange-50 border-2 border-orange-200 rounded hover:bg-orange-100"
+                                >
+                                    <div className="font-medium">1回誤答済み</div>
+                                    <div className="text-sm text-gray-600">解答権あり、1回誤答済み</div>
+                                </button>
+                                <button
+                                    onClick={() => saveStatusEdit({ hasAnswerRight: false, missedOnce: true })}
+                                    className="w-full p-3 text-left bg-red-50 border-2 border-red-200 rounded hover:bg-red-100"
+                                >
+                                    <div className="font-medium">封鎖状態</div>
+                                    <div className="text-sm text-gray-600">解答権なし</div>
+                                </button>
+                            </div>
+                            <button
+                                onClick={cancelEdit}
+                                className="w-full bg-gray-500 text-white py-2 px-4 rounded"
+                            >
+                                キャンセル
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50 p-4">
+                    <div className="max-w-4xl mx-auto">
+                        <div className="bg-white rounded-lg shadow-lg p-6">
+                            <div className="flex items-center justify-between mb-6">
+                                <h1 className="text-3xl font-bold text-gray-800">クイズ大会 得点計算</h1>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={handleUndo}
+                                        disabled={history.length === 0}
+                                        className="flex items-center gap-1 bg-blue-500 text-white px-3 py-2 rounded disabled:bg-gray-300 disabled:cursor-not-allowed"
+                                    >
+                                        <Undo2 />
+                                        UNDO
+                                    </button>
+                                    <button
+                                        onClick={handleReset}
+                                        className="flex items-center gap-1 bg-red-500 text-white px-3 py-2 rounded"
+                                    >
+                                        <RotateCcw />
+                                        リセット
+                                    </button>
+                                </div>
+                            </div>
+
+                            {winner && (
+                                <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6">
+                                    <div className="text-2xl font-bold">🎉 {winner}の勝利！</div>
+                                </div>
+                            )}
+
+                            <TeamSection teamName="Aチーム" teamData={gameState.teamA} teamKey="teamA" />
+                            <TeamSection teamName="Bチーム" teamData={gameState.teamB} teamKey="teamB" />
+
+                            <div className="mt-6 p-4 bg-gray-100 rounded-lg">
+                                <h3 className="font-bold mb-2">操作説明</h3>
+                                <ul className="text-sm text-gray-600 space-y-1">
+                                    <li>• 得点をタップすると手動編集できます</li>
+                                    <li>• 状態表示（誤答済、封鎖）をタップすると状態を変更できます</li>
+                                    <li>• 黄色：リーチ（次の正解で200点到達）</li>
+                                    <li>• オレンジ：1回誤答済み</li>
+                                    <li>• 赤：解答権封鎖中</li>
+                                    <li>• 相手チームが誤答すると自チームの封鎖者が復活</li>
+                                </ul>
+                                {history.length > 0 && (
+                                    <div className="mt-2 text-xs text-blue-600">
+                                        履歴: {history.length}件保存中
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<QuizScoreApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
